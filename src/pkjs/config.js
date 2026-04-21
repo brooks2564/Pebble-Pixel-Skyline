@@ -14,10 +14,10 @@ module.exports = [
         "type": "radiogroup",
         "messageKey": "CLOCK_STYLE",
         "label": "Clock Style",
-        "defaultValue": "0",
+        "defaultValue": 0,
         "options": [
-          { "label": "Analog Hands", "value": "0" },
-          { "label": "Digital", "value": "1" }
+          { "label": "Analog Hands", "value": 0 },
+          { "label": "Digital", "value": 1 }
         ]
       },
       {
@@ -39,10 +39,10 @@ module.exports = [
         "type": "radiogroup",
         "messageKey": "TEMP_UNIT",
         "label": "Temperature Unit",
-        "defaultValue": "0",
+        "defaultValue": 0,
         "options": [
-          { "label": "\u00b0F  Fahrenheit", "value": "0" },
-          { "label": "\u00b0C  Celsius", "value": "1" }
+          { "label": "\u00b0F  Fahrenheit", "value": 0 },
+          { "label": "\u00b0C  Celsius", "value": 1 }
         ]
       }
     ]

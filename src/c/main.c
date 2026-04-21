@@ -216,16 +216,24 @@ typedef struct {
 } Building;
 
 static const Building s_buildings[] = {
-  {   0, 28,  70, { .argb = GColorOxfordBlueARGB8 } },
-  {  28, 22,  85, { .argb = GColorImperialPurpleARGB8 } },
-  {  48, 16,  55, { .argb = GColorDarkGrayARGB8 } },
-  {  56, 88, 110, { .argb = GColorBlackARGB8 } },    // CLOCK TOWER (tall center, wide)
-  { 144, 16,  55, { .argb = GColorDarkGrayARGB8 } },
-  { 156, 28,  85, { .argb = GColorImperialPurpleARGB8 } },
-  { 180, 20,  50, { .argb = GColorOxfordBlueARGB8 } },
-  { 190, 10,  70, { .argb = GColorDarkGrayARGB8 } }
+  // Background — fill sky gap on both sides
+  {   0, 58,  95, { .argb = GColorOxfordBlueARGB8 } },       // 0: left bg (top=85)
+  { 142, 58,  95, { .argb = GColorOxfordBlueARGB8 } },       // 1: right bg (top=85)
+  // Left foreground
+  {   2, 18,  80, { .argb = GColorImperialPurpleARGB8 } },   // 2: x=2-20, top=100
+  {  16, 22,  95, { .argb = GColorDarkGrayARGB8 } },         // 3: x=16-38, top=85 (tall)
+  {  34, 14,  68, { .argb = GColorImperialPurpleARGB8 } },   // 4: x=34-48, top=112
+  {  44, 16,  84, { .argb = GColorDarkGrayARGB8 } },         // 5: x=44-60, top=96
+  // Clock tower
+  {  56, 88, 110, { .argb = GColorBlackARGB8 } },            // 6: CLOCK TOWER
+  // Right foreground
+  { 144, 16,  84, { .argb = GColorDarkGrayARGB8 } },         // 7: x=144-160, top=96
+  { 154, 14,  68, { .argb = GColorImperialPurpleARGB8 } },   // 8: x=154-168, top=112
+  { 162, 22,  95, { .argb = GColorDarkGrayARGB8 } },         // 9: x=162-184, top=85 (tall)
+  { 178, 18,  80, { .argb = GColorImperialPurpleARGB8 } },   // 10: x=178-196, top=100
 };
 #define N_BUILDINGS (sizeof(s_buildings)/sizeof(s_buildings[0]))
+#define TOWER_IDX 6
 
 static void draw_city(GContext *ctx) {
   bool night = is_night();
@@ -236,8 +244,8 @@ static void draw_city(GContext *ctx) {
     graphics_context_set_fill_color(ctx, b.color);
     graphics_fill_rect(ctx, GRect(b.x, top, b.w, b.h), 0, GCornerNone);
 
-    // Skip windows on the clock tower (i==3)
-    if (i == 3) continue;
+    // Skip windows on the background fills (0,1) and clock tower
+    if (i == 0 || i == 1 || i == TOWER_IDX) continue;
 
     // Windows — 3px x 4px grid, spaced 5x7
     for (int wy = top + 6; wy < CITY_BOTTOM - 4; wy += 7) {
@@ -257,8 +265,8 @@ static void draw_city(GContext *ctx) {
     }
   }
 
-  // Clock tower special features (building index 3)
-  Building tower = s_buildings[3];
+  // Clock tower special features
+  Building tower = s_buildings[TOWER_IDX];
   int tower_top = CITY_BOTTOM - tower.h;
 
   // Tower roof (triangle/spire)
