@@ -1,0 +1,30 @@
+{
+  "name": "pixel-skyline",
+  "author": "Brooman Inks",
+  "version": "1.0.0",
+  "keywords": ["pebble-app"],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "Pixel Skyline",
+    "shortName": "Pixel Skyline",
+    "uuid": "96bd2286-12b5-4e5f-85df-070ae550f98c",
+    "sdkVersion": "3",
+    "enableMultiJS": true,
+    "targetPlatforms": ["emery"],
+    "watchapp": {
+      "watchface": true
+    },
+    "capabilities": ["location"],
+    "messageKeys": {
+      "TEMPERATURE": 1,
+      "CONDITIONS": 2,
+      "SUNRISE": 3,
+      "SUNSET": 4,
+      "REQUEST_WEATHER": 5
+    },
+    "resources": {
+      "media": []
+    }
+  }
+}
