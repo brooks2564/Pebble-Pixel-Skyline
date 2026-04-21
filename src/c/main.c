@@ -10,12 +10,21 @@
 #define STREET_BOTTOM  208     // y=180-208: street
 // y=208-228: info bar
 
+// ── Persist keys ──────────────────────────────────────────────────────────
+#define PERSIST_CLOCK_STYLE  100
+#define PERSIST_TEMP_UNIT    101
+#define PERSIST_HOUR_FORMAT  102
+#define PERSIST_ANIMATIONS   103
+
 // ── State ──────────────────────────────────────────────────────────────────
 static Window      *s_window;
 static Layer       *s_scene_layer;
+static TextLayer   *s_time_layer;    // digital clock display on tower
 static TextLayer   *s_info_layer;
+static GFont        s_time_font;
 static GFont        s_info_font;
 
+static char s_time_buf[8];
 static char s_info_buf[48];
 
 // Weather (from pkjs)
@@ -28,6 +37,12 @@ static int s_sunset  = -1;
 static int s_hour    = 12;
 static int s_minute  = 0;
 static int s_frame   = 0;   // per-minute frame counter for deterministic animation
+
+// User settings (persisted)
+static int  s_clock_style  = 0;   // 0=analog, 1=digital
+static int  s_temp_unit    = 0;   // 0=°F, 1=°C
+static bool s_hour_format  = false; // false=12h, true=24h
+static bool s_animations   = true;  // car animations on/off
 
 // Fireworks state (triggered by wrist flick)
 #define FIREWORKS_FRAMES 30
@@ -264,37 +279,40 @@ static void draw_city(GContext *ctx) {
   graphics_context_set_stroke_color(ctx, GColorBlack);
   graphics_draw_round_rect(ctx, face, 3);
 
-  // Clock hands — centered on face
   int cx = face.origin.x + face.size.w / 2;
   int cy = face.origin.y + face.size.h / 2;
-  int r_min = face.size.h / 2 - 2;   // minute hand radius, limited by face height
-  int r_hr  = r_min * 2 / 3;
 
-  // Tick marks at 12, 3, 6, 9
-  graphics_context_set_stroke_color(ctx, GColorDarkGray);
-  graphics_draw_pixel(ctx, GPoint(cx,           face.origin.y + 2));   // 12
-  graphics_draw_pixel(ctx, GPoint(face.origin.x + face.size.w - 3, cy)); // 3
-  graphics_draw_pixel(ctx, GPoint(cx,           face.origin.y + face.size.h - 3)); // 6
-  graphics_draw_pixel(ctx, GPoint(face.origin.x + 2, cy));            // 9
+  if (s_clock_style == 0) {
+    // ── Analog hands ──
+    int r_min = face.size.h / 2 - 2;
+    int r_hr  = r_min * 2 / 3;
 
-  // Minute hand
-  int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
-  int min_ex = cx + (sin_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
-  int min_ey = cy - (cos_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_draw_line(ctx, GPoint(cx, cy), GPoint(min_ex, min_ey));
+    // Tick marks at 12, 3, 6, 9
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_draw_pixel(ctx, GPoint(cx,                             face.origin.y + 2));
+    graphics_draw_pixel(ctx, GPoint(face.origin.x + face.size.w - 3, cy));
+    graphics_draw_pixel(ctx, GPoint(cx,                             face.origin.y + face.size.h - 3));
+    graphics_draw_pixel(ctx, GPoint(face.origin.x + 2,             cy));
 
-  // Hour hand (including minute fraction)
-  int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
-  int hr_ex = cx + (sin_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
-  int hr_ey = cy - (cos_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_draw_line(ctx, GPoint(cx, cy), GPoint(hr_ex, hr_ey));
-  graphics_draw_line(ctx, GPoint(cx+1, cy), GPoint(hr_ex+1, hr_ey)); // thicker
+    // Minute hand
+    int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
+    int min_ex = cx + (sin_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
+    int min_ey = cy - (cos_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(min_ex, min_ey));
 
-  // Center dot
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_circle(ctx, GPoint(cx, cy), 2);
+    // Hour hand (including minute fraction)
+    int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
+    int hr_ex = cx + (sin_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
+    int hr_ey = cy - (cos_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
+    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(hr_ex, hr_ey));
+    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(hr_ex + 1, hr_ey));
+
+    // Center dot
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_circle(ctx, GPoint(cx, cy), 2);
+  }
+  // Digital mode: the TextLayer (s_time_layer) is visible and renders over the face
 }
 
 // ── Drawing: street ────────────────────────────────────────────────────────
@@ -314,6 +332,8 @@ static void draw_street(GContext *ctx) {
   for (int dx = -dash_off; dx < SCREEN_W; dx += 20) {
     graphics_fill_rect(ctx, GRect(dx, lane_y, 12, 2), 0, GCornerNone);
   }
+
+  if (!s_animations) return;
 
   // Cars — 3 cars at different speeds
   struct CarSpec { int speed; int y; GColor body; GColor window; };
@@ -425,22 +445,30 @@ static void scene_update(Layer *layer, GContext *ctx) {
 static void update_time_text(struct tm *tt) {
   s_hour   = tt->tm_hour;
   s_minute = tt->tm_min;
+
+  // Update digital clock TextLayer (visible only in digital mode)
+  if (s_clock_style == 1) {
+    if (s_hour_format) {
+      snprintf(s_time_buf, sizeof(s_time_buf), "%02d:%02d", tt->tm_hour, tt->tm_min);
+    } else {
+      int h12 = tt->tm_hour % 12;
+      if (h12 == 0) h12 = 12;
+      snprintf(s_time_buf, sizeof(s_time_buf), "%d:%02d", h12, tt->tm_min);
+    }
+    text_layer_set_text(s_time_layer, s_time_buf);
+  }
 }
 
 static void update_info_text(struct tm *tt) {
-  // "Fri Apr 19  10:42  72°F"
   static const char *days[]   = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
   static const char *months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
-  int h12 = tt->tm_hour % 12;
-  if (h12 == 0) h12 = 12;
   if (s_temp > -999) {
-    snprintf(s_info_buf, sizeof(s_info_buf), "%s %s %d  %d:%02d  %d°F",
-             days[tt->tm_wday], months[tt->tm_mon], tt->tm_mday,
-             h12, tt->tm_min, s_temp);
+    const char *unit = s_temp_unit ? "\xb0" "C" : "\xb0" "F";
+    snprintf(s_info_buf, sizeof(s_info_buf), "%s %s %d   %d%s",
+             days[tt->tm_wday], months[tt->tm_mon], tt->tm_mday, s_temp, unit);
   } else {
-    snprintf(s_info_buf, sizeof(s_info_buf), "%s %s %d  %d:%02d",
-             days[tt->tm_wday], months[tt->tm_mon], tt->tm_mday,
-             h12, tt->tm_min);
+    snprintf(s_info_buf, sizeof(s_info_buf), "%s %s %d",
+             days[tt->tm_wday], months[tt->tm_mon], tt->tm_mday);
   }
   text_layer_set_text(s_info_layer, s_info_buf);
 }
@@ -474,15 +502,47 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   vibes_short_pulse();
 }
 
-// ── AppMessage (weather from pkjs) ─────────────────────────────────────────
+// ── Settings apply ─────────────────────────────────────────────────────────
+static void apply_settings(void) {
+  // Show/hide digital clock TextLayer based on clock style
+  layer_set_hidden(text_layer_get_layer(s_time_layer), s_clock_style != 1);
+}
+
+// ── AppMessage (weather + settings from pkjs) ──────────────────────────────
 static void inbox_received(DictionaryIterator *iter, void *context) {
   Tuple *t;
+  bool settings_changed = false;
+
   if ((t = dict_find(iter, MESSAGE_KEY_TEMPERATURE))) s_temp    = t->value->int32;
   if ((t = dict_find(iter, MESSAGE_KEY_CONDITIONS)))  s_wx_code = t->value->int32;
   if ((t = dict_find(iter, MESSAGE_KEY_SUNRISE)))     s_sunrise = t->value->int32;
   if ((t = dict_find(iter, MESSAGE_KEY_SUNSET)))      s_sunset  = t->value->int32;
-  // Refresh info bar with temp
+
+  if ((t = dict_find(iter, MESSAGE_KEY_CLOCK_STYLE))) {
+    s_clock_style = t->value->int32;
+    persist_write_int(PERSIST_CLOCK_STYLE, s_clock_style);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_TEMP_UNIT))) {
+    s_temp_unit = t->value->int32;
+    persist_write_int(PERSIST_TEMP_UNIT, s_temp_unit);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_HOUR_FORMAT))) {
+    s_hour_format = t->value->int32 != 0;
+    persist_write_bool(PERSIST_HOUR_FORMAT, s_hour_format);
+    settings_changed = true;
+  }
+  if ((t = dict_find(iter, MESSAGE_KEY_ANIMATIONS))) {
+    s_animations = t->value->int32 != 0;
+    persist_write_bool(PERSIST_ANIMATIONS, s_animations);
+    settings_changed = true;
+  }
+
+  if (settings_changed) apply_settings();
+
   time_t now = time(NULL);
+  update_time_text(localtime(&now));
   update_info_text(localtime(&now));
   layer_mark_dirty(s_scene_layer);
 }
@@ -492,12 +552,28 @@ static void window_load(Window *win) {
   Layer *root = window_get_root_layer(win);
   GRect bounds = layer_get_bounds(root);
 
+  // Load persisted settings
+  if (persist_exists(PERSIST_CLOCK_STYLE))  s_clock_style = persist_read_int(PERSIST_CLOCK_STYLE);
+  if (persist_exists(PERSIST_TEMP_UNIT))    s_temp_unit   = persist_read_int(PERSIST_TEMP_UNIT);
+  if (persist_exists(PERSIST_HOUR_FORMAT))  s_hour_format = persist_read_bool(PERSIST_HOUR_FORMAT);
+  if (persist_exists(PERSIST_ANIMATIONS))   s_animations  = persist_read_bool(PERSIST_ANIMATIONS);
+
   // Scene layer (draws everything)
   s_scene_layer = layer_create(bounds);
   layer_set_update_proc(s_scene_layer, scene_update);
   layer_add_child(root, s_scene_layer);
 
-  // Info bar (bottom strip) — shows time + date + weather
+  // Digital clock TextLayer — shown only in digital mode, centered on the clock tower face
+  // Tower: x=56, w=88 → face GRect(60, tower_top+6, 80, 40), tower_top = 180-110 = 70 → face y=76
+  s_time_font = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
+  s_time_layer = text_layer_create(GRect(60, 82, 80, 26));
+  text_layer_set_background_color(s_time_layer, GColorClear);
+  text_layer_set_text_color(s_time_layer, GColorBlack);
+  text_layer_set_font(s_time_layer, s_time_font);
+  text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
+  layer_add_child(s_scene_layer, text_layer_get_layer(s_time_layer));
+
+  // Info bar (bottom strip) — shows date + weather
   s_info_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_info_layer = text_layer_create(GRect(0, STREET_BOTTOM + 2, SCREEN_W, SCREEN_H - STREET_BOTTOM - 2));
   text_layer_set_background_color(s_info_layer, GColorClear);
@@ -505,6 +581,9 @@ static void window_load(Window *win) {
   text_layer_set_font(s_info_layer, s_info_font);
   text_layer_set_text_alignment(s_info_layer, GTextAlignmentCenter);
   layer_add_child(s_scene_layer, text_layer_get_layer(s_info_layer));
+
+  // Apply loaded settings
+  apply_settings();
 
   // Initial update
   time_t now = time(NULL);
@@ -515,6 +594,7 @@ static void window_load(Window *win) {
 
 static void window_unload(Window *win) {
   if (s_fw_timer) { app_timer_cancel(s_fw_timer); s_fw_timer = NULL; }
+  text_layer_destroy(s_time_layer);
   text_layer_destroy(s_info_layer);
   layer_destroy(s_scene_layer);
 }
@@ -532,7 +612,7 @@ static void init(void) {
   accel_tap_service_subscribe(tap_handler);
 
   app_message_register_inbox_received(inbox_received);
-  app_message_open(128, 64);
+  app_message_open(256, 64);
 
   window_stack_push(s_window, true);
 }
