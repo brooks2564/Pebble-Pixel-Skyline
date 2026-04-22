@@ -10,19 +10,19 @@
 #define STREET_BOTTOM  208
 // y=208-228: info bar
 
-// ── Billboard (sky zone) ───────────────────────────────────────────────────
-#define BB_X      32
-#define BB_Y      10
-#define BB_W      136
-#define BB_H      66
+// ── Billboard (floats above shortened center buildings) ────────────────────
+#define BB_X      55
+#define BB_Y      56
+#define BB_W      90
+#define BB_H      44
 #define BB_FX     (BB_X + 4)
 #define BB_FY     (BB_Y + 4)
 #define BB_FW     (BB_W - 8)
 #define BB_FH     (BB_H - 8)
 #define BB_CX     (BB_X + BB_W / 2)
 #define BB_CY     (BB_Y + BB_H / 2)
-#define BB_POLE_L (BB_X + 22)
-#define BB_POLE_R (BB_X + BB_W - 22)
+#define BB_POLE_L (BB_X + 13)
+#define BB_POLE_R (BB_X + BB_W - 13)
 
 // ── Persist keys ──────────────────────────────────────────────────────────
 #define PERSIST_CLOCK_STYLE  100
@@ -193,18 +193,17 @@ static void draw_sky(GContext *ctx) {
 
 // ── Draw: billboard ────────────────────────────────────────────────────────
 static void draw_billboard(GContext *ctx) {
-  // Support poles from billboard bottom to SKY_BOTTOM (buildings will overdraw the ends)
+  // Support poles — extend down 30px; buildings overdraw the bottoms
   graphics_context_set_fill_color(ctx, GColorDarkGray);
-  int pole_h = SKY_BOTTOM - (BB_Y + BB_H) + 6;
-  graphics_fill_rect(ctx, GRect(BB_POLE_L - 1, BB_Y + BB_H, 3, pole_h), 0, GCornerNone);
-  graphics_fill_rect(ctx, GRect(BB_POLE_R - 1, BB_Y + BB_H, 3, pole_h), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(BB_POLE_L - 1, BB_Y + BB_H, 3, 30), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(BB_POLE_R - 1, BB_Y + BB_H, 3, 30), 0, GCornerNone);
 
   // Outer frame
   graphics_context_set_fill_color(ctx, GColorDarkGray);
   graphics_fill_rect(ctx, GRect(BB_X, BB_Y, BB_W, BB_H), 3, GCornersAll);
 
-  // Inner face
-  graphics_context_set_fill_color(ctx, GColorPastelYellow);
+  // Inner face — bright yellow for visibility
+  graphics_context_set_fill_color(ctx, GColorYellow);
   graphics_fill_rect(ctx, GRect(BB_FX, BB_FY, BB_FW, BB_FH), 2, GCornersAll);
 
   // Borders
@@ -218,7 +217,7 @@ static void draw_billboard(GContext *ctx) {
     int r  = BB_FH / 2 - 2;
 
     // Clock circle background
-    graphics_context_set_fill_color(ctx, GColorPastelYellow);
+    graphics_context_set_fill_color(ctx, GColorYellow);
     graphics_fill_circle(ctx, GPoint(cx, cy), r);
     graphics_context_set_stroke_color(ctx, GColorBlack);
     graphics_draw_circle(ctx, GPoint(cx, cy), r);
@@ -260,18 +259,21 @@ typedef struct {
 } Building;
 
 static const Building s_buildings[] = {
-  {   0, 16, 85, { .argb = GColorDarkGrayARGB8       } },
-  {  16, 14, 72, { .argb = GColorImperialPurpleARGB8 } },
-  {  30, 18, 92, { .argb = GColorOxfordBlueARGB8     } },
-  {  48, 14, 65, { .argb = GColorDarkGrayARGB8       } },
-  {  62, 16, 80, { .argb = GColorImperialPurpleARGB8 } },
-  {  78, 20, 90, { .argb = GColorDarkGrayARGB8       } },
-  {  98, 16, 68, { .argb = GColorOxfordBlueARGB8     } },
-  { 114, 20, 95, { .argb = GColorImperialPurpleARGB8 } },
-  { 134, 16, 80, { .argb = GColorDarkGrayARGB8       } },
-  { 150, 14, 68, { .argb = GColorOxfordBlueARGB8     } },
-  { 164, 18, 85, { .argb = GColorImperialPurpleARGB8 } },
-  { 182, 18, 75, { .argb = GColorDarkGrayARGB8       } },
+  // Outer tall buildings — bookend the skyline
+  {   0, 16, 85, { .argb = GColorDarkGrayARGB8       } },  // top=95
+  {  16, 14, 78, { .argb = GColorImperialPurpleARGB8 } },  // top=102
+  {  30, 18, 92, { .argb = GColorOxfordBlueARGB8     } },  // top=88
+  {  48, 14, 70, { .argb = GColorDarkGrayARGB8       } },  // top=110
+  // Center valley — shorter so billboard can sit above them
+  {  62, 16, 55, { .argb = GColorImperialPurpleARGB8 } },  // top=125
+  {  78, 20, 48, { .argb = GColorDarkGrayARGB8       } },  // top=132
+  {  98, 16, 42, { .argb = GColorOxfordBlueARGB8     } },  // top=138
+  { 114, 20, 48, { .argb = GColorImperialPurpleARGB8 } },  // top=132
+  { 134, 16, 55, { .argb = GColorDarkGrayARGB8       } },  // top=125
+  // Outer tall buildings
+  { 150, 14, 70, { .argb = GColorOxfordBlueARGB8     } },  // top=110
+  { 164, 18, 92, { .argb = GColorImperialPurpleARGB8 } },  // top=88
+  { 182, 18, 80, { .argb = GColorDarkGrayARGB8       } },  // top=100
 };
 #define N_BUILDINGS (sizeof(s_buildings) / sizeof(s_buildings[0]))
 
@@ -517,10 +519,10 @@ static void window_load(Window *win) {
   layer_add_child(root, s_scene_layer);
 
   // Digital clock TextLayer centered in billboard inner face
-  // Face: GRect(BB_FX, BB_FY, BB_FW, BB_FH) = GRect(36, 14, 128, 58)
-  // LECO_28 is ~28px tall; center: BB_FY + (BB_FH-28)/2 = 14+15 = 29
-  s_time_font  = fonts_get_system_font(FONT_KEY_LECO_28_LIGHT_NUMBERS);
-  s_time_layer = text_layer_create(GRect(BB_FX, BB_FY + 15, BB_FW, 30));
+  // Face: GRect(BB_FX=59, BB_FY=60, BB_FW=82, BB_FH=36)
+  // LECO_20 ~20px tall; center: BB_FY + (BB_FH-20)/2 = 60+8 = 68
+  s_time_font  = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
+  s_time_layer = text_layer_create(GRect(BB_FX, BB_FY + 8, BB_FW, 22));
   text_layer_set_background_color(s_time_layer, GColorClear);
   text_layer_set_text_color(s_time_layer, GColorBlack);
   text_layer_set_font(s_time_layer, s_time_font);
