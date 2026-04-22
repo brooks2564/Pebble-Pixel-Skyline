@@ -5,10 +5,24 @@
 
 // ── Layout zones ───────────────────────────────────────────────────────────
 #define SKY_TOP        0
-#define SKY_BOTTOM     85      // y=0-85: sky
-#define CITY_BOTTOM    180     // y=85-180: buildings
-#define STREET_BOTTOM  208     // y=180-208: street
+#define SKY_BOTTOM     85
+#define CITY_BOTTOM    180
+#define STREET_BOTTOM  208
 // y=208-228: info bar
+
+// ── Billboard (sky zone) ───────────────────────────────────────────────────
+#define BB_X      55
+#define BB_Y      26
+#define BB_W      90
+#define BB_H      44
+#define BB_FX     (BB_X + 4)
+#define BB_FY     (BB_Y + 4)
+#define BB_FW     (BB_W - 8)
+#define BB_FH     (BB_H - 8)
+#define BB_CX     (BB_X + BB_W / 2)
+#define BB_CY     (BB_Y + BB_H / 2)
+#define BB_POLE_L (BB_X + 13)
+#define BB_POLE_R (BB_X + BB_W - 13)
 
 // ── Persist keys ──────────────────────────────────────────────────────────
 #define PERSIST_CLOCK_STYLE  100
@@ -19,7 +33,7 @@
 // ── State ──────────────────────────────────────────────────────────────────
 static Window      *s_window;
 static Layer       *s_scene_layer;
-static TextLayer   *s_time_layer;    // digital clock display on tower
+static TextLayer   *s_time_layer;
 static TextLayer   *s_info_layer;
 static GFont        s_time_font;
 static GFont        s_info_font;
@@ -27,42 +41,31 @@ static GFont        s_info_font;
 static char s_time_buf[8];
 static char s_info_buf[48];
 
-// Weather (from pkjs)
-static int s_temp    = -999;
-static int s_wx_code = -1;
-static int s_sunrise = -1;  // mins since midnight
-static int s_sunset  = -1;
+static int  s_temp    = -999;
+static int  s_wx_code = -1;
+static int  s_sunrise = -1;
+static int  s_sunset  = -1;
 
-// Time tracking
-static int s_hour    = 12;
-static int s_minute  = 0;
-static int s_frame   = 0;   // per-minute frame counter for deterministic animation
+static int  s_hour   = 12;
+static int  s_minute = 0;
+static int  s_frame  = 0;
 
-// User settings (persisted)
-static int  s_clock_style  = 0;   // 0=analog, 1=digital
-static int  s_temp_unit    = 0;   // 0=°F, 1=°C
-static bool s_hour_format  = false; // false=12h, true=24h
-static bool s_animations   = true;  // car animations on/off
+static int  s_clock_style = 0;
+static int  s_temp_unit   = 0;
+static bool s_hour_format = false;
+static bool s_animations  = true;
 
-// Fireworks state (triggered by wrist flick)
-#define FIREWORKS_FRAMES 30
-#define FIREWORKS_PARTICLES 20
-static bool s_fw_active = false;
-static int  s_fw_frame  = 0;
-static AppTimer *s_fw_timer = NULL;
-typedef struct {
-  int16_t x, y;
-  int16_t vx, vy;
-  GColor  color;
-} Particle;
-static Particle s_particles[FIREWORKS_PARTICLES];
+// Rush hour (wrist tap)
+#define RUSH_FRAMES 50
+static bool      s_rush_active = false;
+static int       s_rush_frame  = 0;
+static AppTimer *s_rush_timer  = NULL;
 
-// ── Weather code helpers ───────────────────────────────────────────────────
-// WMO weather codes → visual category
+// ── Weather helpers ────────────────────────────────────────────────────────
 enum WxCat { WX_UNKNOWN, WX_CLEAR, WX_CLOUDY, WX_RAIN, WX_SNOW, WX_FOG, WX_STORM };
 
 static int wx_category(int code) {
-  if (code < 0) return WX_UNKNOWN;
+  if (code < 0)  return WX_UNKNOWN;
   if (code == 0) return WX_CLEAR;
   if (code <= 3) return WX_CLOUDY;
   if (code <= 48) return WX_FOG;
@@ -73,30 +76,23 @@ static int wx_category(int code) {
   return WX_STORM;
 }
 
-// Is it currently nighttime? (before sunrise or after sunset)
 static bool is_night(void) {
-  if (s_sunrise < 0 || s_sunset < 0) {
-    // No data — fall back to simple 6pm-6am
-    return (s_hour < 6 || s_hour >= 20);
-  }
+  if (s_sunrise < 0 || s_sunset < 0) return (s_hour < 6 || s_hour >= 20);
   int now_min = s_hour * 60 + s_minute;
   return (now_min < s_sunrise || now_min >= s_sunset);
 }
 
-// Sky color based on time of day
 static GColor sky_color(void) {
   int now_min = s_hour * 60 + s_minute;
-  int sr = s_sunrise >= 0 ? s_sunrise : 6*60;
-  int ss = s_sunset  >= 0 ? s_sunset  : 20*60;
-
-  // Twilight windows: 30 min around sunrise/sunset
+  int sr = s_sunrise >= 0 ? s_sunrise : 6 * 60;
+  int ss = s_sunset  >= 0 ? s_sunset  : 20 * 60;
   if (now_min < sr - 30 || now_min >= ss + 30) return GColorOxfordBlue;
-  if (now_min < sr + 30) return GColorOrange;       // sunrise
-  if (now_min >= ss - 30) return GColorOrange;      // sunset
-  return GColorVividCerulean;                       // daytime
+  if (now_min < sr + 30)  return GColorOrange;
+  if (now_min >= ss - 30) return GColorOrange;
+  return GColorVividCerulean;
 }
 
-// ── Deterministic PRNG for stars/clouds ────────────────────────────────────
+// ── Deterministic PRNG ─────────────────────────────────────────────────────
 static uint32_t rng_seed = 1;
 static void rng_set(uint32_t s) { rng_seed = s ? s : 1; }
 static uint32_t rng_next(void) {
@@ -104,82 +100,70 @@ static uint32_t rng_next(void) {
   return rng_seed;
 }
 
-// ── Drawing: sky ───────────────────────────────────────────────────────────
+// ── Draw: sky ──────────────────────────────────────────────────────────────
 static void draw_sky(GContext *ctx) {
-  // Fill sky
   graphics_context_set_fill_color(ctx, sky_color());
   graphics_fill_rect(ctx, GRect(0, SKY_TOP, SCREEN_W, SKY_BOTTOM), 0, GCornerNone);
 
   bool night = is_night();
 
-  // Stars at night — deterministic based on current day
   if (night) {
-    rng_set(20250419 + (s_hour * 60 + s_minute) / 60);  // new stars each hour
-    graphics_context_set_stroke_color(ctx, GColorWhite);
+    rng_set(20250419 + (s_hour * 60 + s_minute) / 60);
     for (int i = 0; i < 40; i++) {
       int x = rng_next() % SCREEN_W;
       int y = rng_next() % (SKY_BOTTOM - 4) + 2;
-      // Vary brightness
       GColor c = (i % 3 == 0) ? GColorLightGray : GColorWhite;
       graphics_context_set_stroke_color(ctx, c);
       graphics_draw_pixel(ctx, GPoint(x, y));
-      // Bright stars get a cross
       if (i % 7 == 0) {
-        graphics_draw_pixel(ctx, GPoint(x+1, y));
-        graphics_draw_pixel(ctx, GPoint(x-1, y));
-        graphics_draw_pixel(ctx, GPoint(x, y+1));
-        graphics_draw_pixel(ctx, GPoint(x, y-1));
+        graphics_draw_pixel(ctx, GPoint(x + 1, y));
+        graphics_draw_pixel(ctx, GPoint(x - 1, y));
+        graphics_draw_pixel(ctx, GPoint(x, y + 1));
+        graphics_draw_pixel(ctx, GPoint(x, y - 1));
       }
     }
   }
 
-  // Sun or moon
-  int now_min = s_hour * 60 + s_minute;
-  int sr = s_sunrise >= 0 ? s_sunrise : 6*60;
-  int ss = s_sunset  >= 0 ? s_sunset  : 20*60;
+  int now_min  = s_hour * 60 + s_minute;
+  int sr       = s_sunrise >= 0 ? s_sunrise : 6 * 60;
+  int ss       = s_sunset  >= 0 ? s_sunset  : 20 * 60;
   int day_len  = ss - sr;
-  int night_len = (24*60) - day_len;
+  int night_len = (24 * 60) - day_len;
 
   GPoint orb_pt;
   GColor orb_color;
   if (!night && day_len > 0) {
-    // Sun travels an arc across the sky
     int frac = ((now_min - sr) * 1000) / day_len;
     int x = (SCREEN_W * frac) / 1000;
     int y = 60 - ((frac < 500 ? frac : 1000 - frac) * 45 / 500);
     orb_pt = GPoint(x, y + 10);
     orb_color = GColorYellow;
   } else if (night_len > 0) {
-    // Moon travels across the night sky
-    int night_min;
-    if (now_min >= ss) night_min = now_min - ss;
-    else night_min = now_min + (24*60 - ss);
+    int night_min = (now_min >= ss) ? (now_min - ss) : (now_min + 24 * 60 - ss);
     int frac = (night_min * 1000) / night_len;
     int x = (SCREEN_W * frac) / 1000;
     int y = 55 - ((frac < 500 ? frac : 1000 - frac) * 40 / 500);
     orb_pt = GPoint(x, y + 10);
     orb_color = GColorWhite;
   } else {
-    orb_pt = GPoint(SCREEN_W/2, 30);
+    orb_pt = GPoint(SCREEN_W / 2, 30);
     orb_color = GColorWhite;
   }
   graphics_context_set_fill_color(ctx, orb_color);
   graphics_fill_circle(ctx, orb_pt, 9);
 
-  // Clouds (3 drifting based on minute counter)
   int wx = wx_category(s_wx_code);
   int n_clouds = (wx == WX_CLOUDY || wx == WX_RAIN || wx == WX_STORM || wx == WX_SNOW) ? 5 : 2;
   graphics_context_set_fill_color(ctx, night ? GColorLightGray : GColorWhite);
   for (int i = 0; i < n_clouds; i++) {
     int drift = (s_frame * (3 + i)) % (SCREEN_W + 40);
     int cx = (drift - 20 + i * 60) % (SCREEN_W + 40) - 20;
-    int cy = 15 + (i * 11) % 30;
+    int cy = 8 + (i * 9) % 14;
     graphics_fill_circle(ctx, GPoint(cx, cy), 7);
     graphics_fill_circle(ctx, GPoint(cx + 8, cy - 2), 8);
     graphics_fill_circle(ctx, GPoint(cx + 15, cy + 1), 7);
   }
 
-  // Rain lines
   if (wx == WX_RAIN || wx == WX_STORM) {
     graphics_context_set_stroke_color(ctx, GColorCeleste);
     for (int i = 0; i < 30; i++) {
@@ -189,7 +173,6 @@ static void draw_sky(GContext *ctx) {
     }
   }
 
-  // Snow flakes
   if (wx == WX_SNOW) {
     graphics_context_set_fill_color(ctx, GColorWhite);
     for (int i = 0; i < 35; i++) {
@@ -199,41 +182,96 @@ static void draw_sky(GContext *ctx) {
     }
   }
 
-  // Lightning bolt occasionally during storm
   if (wx == WX_STORM && (s_frame % 4) == 0) {
     graphics_context_set_stroke_color(ctx, GColorYellow);
     int bx = 50 + (s_frame * 23) % 100;
-    graphics_draw_line(ctx, GPoint(bx, 20),     GPoint(bx-4, 40));
-    graphics_draw_line(ctx, GPoint(bx-4, 40),   GPoint(bx+2, 45));
-    graphics_draw_line(ctx, GPoint(bx+2, 45),   GPoint(bx-3, 65));
+    graphics_draw_line(ctx, GPoint(bx, 20),   GPoint(bx - 4, 40));
+    graphics_draw_line(ctx, GPoint(bx - 4, 40), GPoint(bx + 2, 45));
+    graphics_draw_line(ctx, GPoint(bx + 2, 45), GPoint(bx - 3, 65));
   }
 }
 
-// ── Drawing: city skyline ──────────────────────────────────────────────────
+// ── Draw: billboard ────────────────────────────────────────────────────────
+static void draw_billboard(GContext *ctx) {
+  // Support poles from billboard bottom to SKY_BOTTOM (buildings will overdraw the ends)
+  graphics_context_set_fill_color(ctx, GColorDarkGray);
+  int pole_h = SKY_BOTTOM - (BB_Y + BB_H) + 6;
+  graphics_fill_rect(ctx, GRect(BB_POLE_L - 1, BB_Y + BB_H, 3, pole_h), 0, GCornerNone);
+  graphics_fill_rect(ctx, GRect(BB_POLE_R - 1, BB_Y + BB_H, 3, pole_h), 0, GCornerNone);
+
+  // Outer frame
+  graphics_context_set_fill_color(ctx, GColorDarkGray);
+  graphics_fill_rect(ctx, GRect(BB_X, BB_Y, BB_W, BB_H), 3, GCornersAll);
+
+  // Inner face
+  graphics_context_set_fill_color(ctx, GColorPastelYellow);
+  graphics_fill_rect(ctx, GRect(BB_FX, BB_FY, BB_FW, BB_FH), 2, GCornersAll);
+
+  // Borders
+  graphics_context_set_stroke_color(ctx, GColorBlack);
+  graphics_draw_round_rect(ctx, GRect(BB_X, BB_Y, BB_W, BB_H), 3);
+  graphics_draw_round_rect(ctx, GRect(BB_FX, BB_FY, BB_FW, BB_FH), 2);
+
+  if (s_clock_style == 0) {
+    int cx = BB_CX;
+    int cy = BB_CY;
+    int r  = BB_FH / 2 - 2;
+
+    // Clock circle background
+    graphics_context_set_fill_color(ctx, GColorPastelYellow);
+    graphics_fill_circle(ctx, GPoint(cx, cy), r);
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    graphics_draw_circle(ctx, GPoint(cx, cy), r);
+
+    // Cardinal ticks
+    graphics_context_set_stroke_color(ctx, GColorDarkGray);
+    graphics_draw_line(ctx, GPoint(cx,     cy - r + 1), GPoint(cx,     cy - r + 3));
+    graphics_draw_line(ctx, GPoint(cx + r - 1, cy),     GPoint(cx + r - 3, cy));
+    graphics_draw_line(ctx, GPoint(cx,     cy + r - 1), GPoint(cx,     cy + r - 3));
+    graphics_draw_line(ctx, GPoint(cx - r + 1, cy),     GPoint(cx - r + 3, cy));
+
+    // Minute hand
+    int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
+    int min_ex = cx + (sin_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
+    int min_ey = cy - (cos_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(min_ex, min_ey));
+
+    // Hour hand (two pixels wide)
+    int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
+    int hr_ex = cx + (sin_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
+    int hr_ey = cy - (cos_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
+    graphics_draw_line(ctx, GPoint(cx,     cy), GPoint(hr_ex,     hr_ey));
+    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(hr_ex + 1, hr_ey));
+
+    // Center dot
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_circle(ctx, GPoint(cx, cy), 2);
+  }
+  // Digital mode: TextLayer renders over the face
+}
+
+// ── Draw: city (12 full-width buildings, no tower) ─────────────────────────
 typedef struct {
   int16_t x, w, h;
   GColor  color;
 } Building;
 
 static const Building s_buildings[] = {
-  // Background — fill sky gap on both sides
-  {   0, 58,  95, { .argb = GColorOxfordBlueARGB8 } },       // 0: left bg (top=85)
-  { 142, 58,  95, { .argb = GColorOxfordBlueARGB8 } },       // 1: right bg (top=85)
-  // Left foreground
-  {   2, 18,  80, { .argb = GColorImperialPurpleARGB8 } },   // 2: x=2-20, top=100
-  {  16, 22,  95, { .argb = GColorDarkGrayARGB8 } },         // 3: x=16-38, top=85 (tall)
-  {  34, 14,  68, { .argb = GColorImperialPurpleARGB8 } },   // 4: x=34-48, top=112
-  {  44, 16,  84, { .argb = GColorDarkGrayARGB8 } },         // 5: x=44-60, top=96
-  // Clock tower
-  {  56, 88, 110, { .argb = GColorBlackARGB8 } },            // 6: CLOCK TOWER
-  // Right foreground
-  { 144, 16,  84, { .argb = GColorDarkGrayARGB8 } },         // 7: x=144-160, top=96
-  { 154, 14,  68, { .argb = GColorImperialPurpleARGB8 } },   // 8: x=154-168, top=112
-  { 162, 22,  95, { .argb = GColorDarkGrayARGB8 } },         // 9: x=162-184, top=85 (tall)
-  { 178, 18,  80, { .argb = GColorImperialPurpleARGB8 } },   // 10: x=178-196, top=100
+  {   0, 16, 85, { .argb = GColorDarkGrayARGB8       } },
+  {  16, 14, 72, { .argb = GColorImperialPurpleARGB8 } },
+  {  30, 18, 92, { .argb = GColorOxfordBlueARGB8     } },
+  {  48, 14, 65, { .argb = GColorDarkGrayARGB8       } },
+  {  62, 16, 80, { .argb = GColorImperialPurpleARGB8 } },
+  {  78, 20, 90, { .argb = GColorDarkGrayARGB8       } },
+  {  98, 16, 68, { .argb = GColorOxfordBlueARGB8     } },
+  { 114, 20, 95, { .argb = GColorImperialPurpleARGB8 } },
+  { 134, 16, 80, { .argb = GColorDarkGrayARGB8       } },
+  { 150, 14, 68, { .argb = GColorOxfordBlueARGB8     } },
+  { 164, 18, 85, { .argb = GColorImperialPurpleARGB8 } },
+  { 182, 18, 75, { .argb = GColorDarkGrayARGB8       } },
 };
-#define N_BUILDINGS (sizeof(s_buildings)/sizeof(s_buildings[0]))
-#define TOWER_IDX 6
+#define N_BUILDINGS (sizeof(s_buildings) / sizeof(s_buildings[0]))
 
 static void draw_city(GContext *ctx) {
   bool night = is_night();
@@ -244,86 +282,44 @@ static void draw_city(GContext *ctx) {
     graphics_context_set_fill_color(ctx, b.color);
     graphics_fill_rect(ctx, GRect(b.x, top, b.w, b.h), 0, GCornerNone);
 
-    // Skip windows on the background fills (0,1) and clock tower
-    if (i == 0 || i == 1 || i == TOWER_IDX) continue;
-
-    // Windows — 3px x 4px grid, spaced 5x7
+    // Windows — 3×4 px, spaced 5×7
     for (int wy = top + 6; wy < CITY_BOTTOM - 4; wy += 7) {
       for (int wx = b.x + 3; wx < b.x + b.w - 3; wx += 5) {
-        // Deterministic "lit" state based on position + hour
         uint32_t seed = (uint32_t)wx * 31u + (uint32_t)wy * 97u + (uint32_t)(s_hour / 2);
         bool lit = night && ((seed % 10) < 7);
-        GColor win_color;
-        if (lit) {
-          win_color = ((seed % 5) == 0) ? GColorOrange : GColorYellow;
-        } else {
-          win_color = GColorDarkGray;
-        }
-        graphics_context_set_fill_color(ctx, win_color);
+        GColor wc = lit ? (((seed % 5) == 0) ? GColorOrange : GColorYellow) : GColorDarkGray;
+        graphics_context_set_fill_color(ctx, wc);
         graphics_fill_rect(ctx, GRect(wx, wy, 3, 4), 0, GCornerNone);
       }
     }
   }
-
-  // Clock tower special features
-  Building tower = s_buildings[TOWER_IDX];
-  int tower_top = CITY_BOTTOM - tower.h;
-
-  // Tower roof (triangle/spire)
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_context_set_stroke_color(ctx, GColorDarkGray);
-  // Spire
-  graphics_draw_line(ctx,
-    GPoint(tower.x + tower.w/2, tower_top - 12),
-    GPoint(tower.x + tower.w/2, tower_top));
-  graphics_draw_line(ctx,
-    GPoint(tower.x + tower.w/2 - 1, tower_top - 12),
-    GPoint(tower.x + tower.w/2 - 1, tower_top));
-
-  // Clock face background (big rect on tower)
-  GRect face = GRect(tower.x + 4, tower_top + 6, tower.w - 8, 40);
-  graphics_context_set_fill_color(ctx, GColorPastelYellow);
-  graphics_fill_rect(ctx, face, 3, GCornersAll);
-  graphics_context_set_stroke_color(ctx, GColorBlack);
-  graphics_draw_round_rect(ctx, face, 3);
-
-  int cx = face.origin.x + face.size.w / 2;
-  int cy = face.origin.y + face.size.h / 2;
-
-  if (s_clock_style == 0) {
-    // ── Analog hands ──
-    int r_min = face.size.h / 2 - 2;
-    int r_hr  = r_min * 2 / 3;
-
-    // Tick marks at 12, 3, 6, 9
-    graphics_context_set_stroke_color(ctx, GColorDarkGray);
-    graphics_draw_pixel(ctx, GPoint(cx,                             face.origin.y + 2));
-    graphics_draw_pixel(ctx, GPoint(face.origin.x + face.size.w - 3, cy));
-    graphics_draw_pixel(ctx, GPoint(cx,                             face.origin.y + face.size.h - 3));
-    graphics_draw_pixel(ctx, GPoint(face.origin.x + 2,             cy));
-
-    // Minute hand
-    int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
-    int min_ex = cx + (sin_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
-    int min_ey = cy - (cos_lookup(min_angle) * r_min / TRIG_MAX_RATIO);
-    graphics_context_set_stroke_color(ctx, GColorBlack);
-    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(min_ex, min_ey));
-
-    // Hour hand (including minute fraction)
-    int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
-    int hr_ex = cx + (sin_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
-    int hr_ey = cy - (cos_lookup(hr_angle) * r_hr / TRIG_MAX_RATIO);
-    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(hr_ex, hr_ey));
-    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(hr_ex + 1, hr_ey));
-
-    // Center dot
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_circle(ctx, GPoint(cx, cy), 2);
-  }
-  // Digital mode: the TextLayer (s_time_layer) is visible and renders over the face
 }
 
-// ── Drawing: street ────────────────────────────────────────────────────────
+// ── Draw: street + rush hour ────────────────────────────────────────────────
+typedef struct { int speed; int y; GColor body; bool rtl; } CarSpec;
+
+static void draw_car(GContext *ctx, int cx, int cy, GColor body, bool rtl) {
+  int bx = rtl ? cx - 20 : cx;
+  graphics_context_set_fill_color(ctx, body);
+  graphics_fill_rect(ctx, GRect(bx, cy, 20, 8), 2, GCornersAll);
+  graphics_context_set_fill_color(ctx, GColorCeleste);
+  graphics_fill_rect(ctx, GRect(bx + 4, cy - 3, 10, 4), 1, GCornersTop);
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_circle(ctx, GPoint(bx + 4,  cy + 8), 2);
+  graphics_fill_circle(ctx, GPoint(bx + 16, cy + 8), 2);
+  if (is_night()) {
+    graphics_context_set_fill_color(ctx, GColorYellow);
+    int hx = rtl ? bx - 2 : bx + 19;
+    graphics_fill_rect(ctx, GRect(hx, cy + 2, 2, 2), 0, GCornerNone);
+  }
+}
+
+static void rush_step(void *data);
+static void start_rush_timer(void) {
+  if (s_rush_timer) app_timer_cancel(s_rush_timer);
+  s_rush_timer = app_timer_register(50, rush_step, NULL);
+}
+
 static void draw_street(GContext *ctx) {
   // Sidewalk
   graphics_context_set_fill_color(ctx, GColorLightGray);
@@ -333,9 +329,9 @@ static void draw_street(GContext *ctx) {
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_fill_rect(ctx, GRect(0, CITY_BOTTOM + 4, SCREEN_W, STREET_BOTTOM - CITY_BOTTOM - 4), 0, GCornerNone);
 
-  // Lane dashes (center line)
+  // Lane dashes
   graphics_context_set_fill_color(ctx, GColorYellow);
-  int lane_y = CITY_BOTTOM + 16;
+  int lane_y   = CITY_BOTTOM + 16;
   int dash_off = (s_frame * 12) % 20;
   for (int dx = -dash_off; dx < SCREEN_W; dx += 20) {
     graphics_fill_rect(ctx, GRect(dx, lane_y, 12, 2), 0, GCornerNone);
@@ -343,118 +339,70 @@ static void draw_street(GContext *ctx) {
 
   if (!s_animations) return;
 
-  // Cars — 3 cars at different speeds
-  struct CarSpec { int speed; int y; GColor body; GColor window; };
-  struct CarSpec cars[3] = {
-    { 7,  CITY_BOTTOM + 7,  GColorRed,       GColorCeleste },
-    { 11, CITY_BOTTOM + 20, GColorYellow,    GColorCeleste },
-    { 5,  CITY_BOTTOM + 7,  GColorBlue,      GColorCeleste }
+  // Regular cars
+  static const CarSpec reg[3] = {
+    {  7, CITY_BOTTOM + 7,  { .argb = GColorRedARGB8    }, false },
+    { 11, CITY_BOTTOM + 20, { .argb = GColorYellowARGB8 }, false },
+    {  5, CITY_BOTTOM + 7,  { .argb = GColorBlueARGB8   }, false },
   };
   for (int i = 0; i < 3; i++) {
-    int cx = (s_frame * cars[i].speed + i * 80) % (SCREEN_W + 30) - 15;
-    int cy = cars[i].y;
-    // Body
-    graphics_context_set_fill_color(ctx, cars[i].body);
-    graphics_fill_rect(ctx, GRect(cx, cy, 20, 8), 2, GCornersAll);
-    // Cabin
-    graphics_context_set_fill_color(ctx, cars[i].window);
-    graphics_fill_rect(ctx, GRect(cx + 4, cy - 3, 10, 4), 1, GCornersTop);
-    // Wheels
-    graphics_context_set_fill_color(ctx, GColorBlack);
-    graphics_fill_circle(ctx, GPoint(cx + 4, cy + 8), 2);
-    graphics_fill_circle(ctx, GPoint(cx + 16, cy + 8), 2);
-    // Headlights at night
-    if (is_night()) {
-      graphics_context_set_fill_color(ctx, GColorYellow);
-      graphics_fill_rect(ctx, GRect(cx + 19, cy + 2, 2, 2), 0, GCornerNone);
+    int cx = (s_frame * reg[i].speed + i * 80) % (SCREEN_W + 30) - 15;
+    draw_car(ctx, cx, reg[i].y, reg[i].body, false);
+  }
+
+  // Rush hour bonus cars (6 fast cars, mixed directions)
+  if (s_rush_active) {
+    static const CarSpec rush[6] = {
+      { 18, CITY_BOTTOM + 6,  { .argb = GColorOrangeARGB8        }, false },
+      { 22, CITY_BOTTOM + 19, { .argb = GColorGreenARGB8         }, false },
+      { 15, CITY_BOTTOM + 6,  { .argb = GColorWhiteARGB8         }, true  },
+      { 20, CITY_BOTTOM + 19, { .argb = GColorRedARGB8           }, true  },
+      { 25, CITY_BOTTOM + 6,  { .argb = GColorMagentaARGB8       }, false },
+      { 17, CITY_BOTTOM + 19, { .argb = GColorCelesteARGB8       }, true  },
+    };
+    for (int i = 0; i < 6; i++) {
+      int travel = (s_rush_frame * rush[i].speed + i * 45) % (SCREEN_W + 30);
+      int cx = rush[i].rtl ? (SCREEN_W + 15 - travel) : (travel - 15);
+      draw_car(ctx, cx, rush[i].y, rush[i].body, rush[i].rtl);
     }
   }
 }
 
-// ── Drawing: info bar ──────────────────────────────────────────────────────
-static void draw_info_bar(GContext *ctx) {
-  // Background strip
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  graphics_fill_rect(ctx, GRect(0, STREET_BOTTOM, SCREEN_W, SCREEN_H - STREET_BOTTOM), 0, GCornerNone);
-
-  // Top separator
-  graphics_context_set_fill_color(ctx, GColorYellow);
-  graphics_fill_rect(ctx, GRect(0, STREET_BOTTOM, SCREEN_W, 1), 0, GCornerNone);
-}
-
-// ── Drawing: fireworks (wrist flick) ───────────────────────────────────────
-static void spawn_fireworks(void) {
-  rng_set(time(NULL));
-  int cx = 40 + (rng_next() % (SCREEN_W - 80));
-  int cy = 30 + (rng_next() % 30);
-  GColor palette[] = { GColorRed, GColorYellow, GColorMagenta, GColorVividCerulean, GColorGreen, GColorOrange };
-  for (int i = 0; i < FIREWORKS_PARTICLES; i++) {
-    s_particles[i].x = cx;
-    s_particles[i].y = cy;
-    // Pseudo-uniform spread: 0-360°
-    int angle = (i * (TRIG_MAX_ANGLE / FIREWORKS_PARTICLES));
-    int speed = 3 + (rng_next() % 3);
-    s_particles[i].vx = (cos_lookup(angle) * speed) / TRIG_MAX_RATIO;
-    s_particles[i].vy = (sin_lookup(angle) * speed) / TRIG_MAX_RATIO;
-    s_particles[i].color = palette[i % 6];
-  }
-}
-
-static void draw_fireworks(GContext *ctx) {
-  if (!s_fw_active) return;
-  for (int i = 0; i < FIREWORKS_PARTICLES; i++) {
-    Particle *p = &s_particles[i];
-    // Fade color as they fall
-    graphics_context_set_fill_color(ctx, p->color);
-    graphics_fill_rect(ctx, GRect(p->x, p->y, 2, 2), 0, GCornerNone);
-    // Trail
-    graphics_context_set_fill_color(ctx, GColorLightGray);
-    graphics_fill_rect(ctx, GRect(p->x - p->vx/2, p->y - p->vy/2, 1, 1), 0, GCornerNone);
-  }
-}
-
-static void fireworks_step(void *data);
-static void start_fireworks_timer(void) {
-  if (s_fw_timer) app_timer_cancel(s_fw_timer);
-  s_fw_timer = app_timer_register(50, fireworks_step, NULL);
-}
-static void fireworks_step(void *data) {
-  s_fw_frame++;
-  // Update particle positions
-  for (int i = 0; i < FIREWORKS_PARTICLES; i++) {
-    Particle *p = &s_particles[i];
-    p->x += p->vx;
-    p->y += p->vy;
-    // Gravity
-    p->vy += 1;
-  }
+static void rush_step(void *data) {
+  s_rush_frame++;
   layer_mark_dirty(s_scene_layer);
-
-  if (s_fw_frame < FIREWORKS_FRAMES) {
-    s_fw_timer = app_timer_register(50, fireworks_step, NULL);
+  if (s_rush_frame < RUSH_FRAMES) {
+    s_rush_timer = app_timer_register(50, rush_step, NULL);
   } else {
-    s_fw_active = false;
-    s_fw_frame  = 0;
-    s_fw_timer  = NULL;
+    s_rush_active = false;
+    s_rush_frame  = 0;
+    s_rush_timer  = NULL;
     layer_mark_dirty(s_scene_layer);
   }
 }
 
-// ── Main scene update_proc ─────────────────────────────────────────────────
+// ── Draw: info bar ─────────────────────────────────────────────────────────
+static void draw_info_bar(GContext *ctx) {
+  graphics_context_set_fill_color(ctx, GColorBlack);
+  graphics_fill_rect(ctx, GRect(0, STREET_BOTTOM, SCREEN_W, SCREEN_H - STREET_BOTTOM), 0, GCornerNone);
+  graphics_context_set_fill_color(ctx, GColorYellow);
+  graphics_fill_rect(ctx, GRect(0, STREET_BOTTOM, SCREEN_W, 1), 0, GCornerNone);
+}
+
+// ── Scene update ────────────────────────────────────────────────────────────
 static void scene_update(Layer *layer, GContext *ctx) {
   draw_sky(ctx);
+  draw_billboard(ctx);
   draw_city(ctx);
   draw_street(ctx);
   draw_info_bar(ctx);
-  draw_fireworks(ctx);
 }
 
-// ── Time/info updating ─────────────────────────────────────────────────────
+// ── Time / info text ────────────────────────────────────────────────────────
 static void update_time_text(struct tm *tt) {
   s_hour   = tt->tm_hour;
   s_minute = tt->tm_min;
 
-  // Update digital clock TextLayer (visible only in digital mode)
   if (s_clock_style == 1) {
     if (s_hour_format) {
       snprintf(s_time_buf, sizeof(s_time_buf), "%02d:%02d", tt->tm_hour, tt->tm_min);
@@ -469,7 +417,8 @@ static void update_time_text(struct tm *tt) {
 
 static void update_info_text(struct tm *tt) {
   static const char *days[]   = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-  static const char *months[] = {"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
+  static const char *months[] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                  "Jul","Aug","Sep","Oct","Nov","Dec"};
   if (s_temp > -999) {
     const char *unit = s_temp_unit ? "\xb0" "C" : "\xb0" "F";
     snprintf(s_info_buf, sizeof(s_info_buf), "%s %s %d   %d%s",
@@ -481,13 +430,12 @@ static void update_info_text(struct tm *tt) {
   text_layer_set_text(s_info_layer, s_info_buf);
 }
 
-// ── Tick handler ───────────────────────────────────────────────────────────
+// ── Tick handler ────────────────────────────────────────────────────────────
 static void tick_handler(struct tm *tt, TimeUnits changed) {
   s_frame++;
   update_time_text(tt);
   update_info_text(tt);
 
-  // Request weather every 30 minutes
   if (tt->tm_min % 30 == 0 && s_wx_code >= -1) {
     DictionaryIterator *iter;
     if (app_message_outbox_begin(&iter) == APP_MSG_OK) {
@@ -499,24 +447,21 @@ static void tick_handler(struct tm *tt, TimeUnits changed) {
   layer_mark_dirty(s_scene_layer);
 }
 
-// ── Accelerometer tap (wrist flick) ───────────────────────────────────────
+// ── Tap handler (rush hour) ─────────────────────────────────────────────────
 static void tap_handler(AccelAxisType axis, int32_t direction) {
-  if (s_fw_active) return;
-  s_fw_active = true;
-  s_fw_frame  = 0;
-  spawn_fireworks();
-  start_fireworks_timer();
-  // Gentle vibration feedback
+  if (s_rush_active) return;
+  s_rush_active = true;
+  s_rush_frame  = 0;
+  start_rush_timer();
   vibes_short_pulse();
 }
 
-// ── Settings apply ─────────────────────────────────────────────────────────
+// ── Settings ────────────────────────────────────────────────────────────────
 static void apply_settings(void) {
-  // Show/hide digital clock TextLayer based on clock style
   layer_set_hidden(text_layer_get_layer(s_time_layer), s_clock_style != 1);
 }
 
-// ── AppMessage (weather + settings from pkjs) ──────────────────────────────
+// ── AppMessage ──────────────────────────────────────────────────────────────
 static void inbox_received(DictionaryIterator *iter, void *context) {
   Tuple *t;
   bool settings_changed = false;
@@ -555,34 +500,33 @@ static void inbox_received(DictionaryIterator *iter, void *context) {
   layer_mark_dirty(s_scene_layer);
 }
 
-// ── Window lifecycle ───────────────────────────────────────────────────────
+// ── Window lifecycle ────────────────────────────────────────────────────────
 static void window_load(Window *win) {
   Layer *root = window_get_root_layer(win);
   GRect bounds = layer_get_bounds(root);
 
-  // Load persisted settings
-  if (persist_exists(PERSIST_CLOCK_STYLE))  s_clock_style = persist_read_int(PERSIST_CLOCK_STYLE);
-  if (persist_exists(PERSIST_TEMP_UNIT))    s_temp_unit   = persist_read_int(PERSIST_TEMP_UNIT);
-  if (persist_exists(PERSIST_HOUR_FORMAT))  s_hour_format = persist_read_bool(PERSIST_HOUR_FORMAT);
-  if (persist_exists(PERSIST_ANIMATIONS))   s_animations  = persist_read_bool(PERSIST_ANIMATIONS);
+  if (persist_exists(PERSIST_CLOCK_STYLE)) s_clock_style = persist_read_int(PERSIST_CLOCK_STYLE);
+  if (persist_exists(PERSIST_TEMP_UNIT))   s_temp_unit   = persist_read_int(PERSIST_TEMP_UNIT);
+  if (persist_exists(PERSIST_HOUR_FORMAT)) s_hour_format = persist_read_bool(PERSIST_HOUR_FORMAT);
+  if (persist_exists(PERSIST_ANIMATIONS))  s_animations  = persist_read_bool(PERSIST_ANIMATIONS);
 
-  // Scene layer (draws everything)
   s_scene_layer = layer_create(bounds);
   layer_set_update_proc(s_scene_layer, scene_update);
   layer_add_child(root, s_scene_layer);
 
-  // Digital clock TextLayer — shown only in digital mode, centered on the clock tower face
-  // Tower: x=56, w=88 → face GRect(60, tower_top+6, 80, 40), tower_top = 180-110 = 70 → face y=76
-  s_time_font = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
-  s_time_layer = text_layer_create(GRect(60, 82, 80, 26));
+  // Digital clock TextLayer centered inside billboard inner face
+  // Face: GRect(BB_FX, BB_FY, BB_FW, BB_FH) = GRect(59, 30, 82, 36)
+  // Font ~20px tall; center vertically: y = BB_FY + (BB_FH - 22) / 2 = 37
+  s_time_font  = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
+  s_time_layer = text_layer_create(GRect(BB_FX, BB_FY + 7, BB_FW, 22));
   text_layer_set_background_color(s_time_layer, GColorClear);
-  text_layer_set_text_color(s_time_layer, GColorBlack);
+  text_layer_set_text_color(s_time_layer, GColorDarkCandyAppleRed);
   text_layer_set_font(s_time_layer, s_time_font);
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   layer_add_child(s_scene_layer, text_layer_get_layer(s_time_layer));
 
-  // Info bar (bottom strip) — shows date + weather
-  s_info_font = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
+  // Info bar — bottom strip
+  s_info_font  = fonts_get_system_font(FONT_KEY_GOTHIC_14_BOLD);
   s_info_layer = text_layer_create(GRect(0, STREET_BOTTOM + 2, SCREEN_W, SCREEN_H - STREET_BOTTOM - 2));
   text_layer_set_background_color(s_info_layer, GColorClear);
   text_layer_set_text_color(s_info_layer, GColorWhite);
@@ -590,10 +534,8 @@ static void window_load(Window *win) {
   text_layer_set_text_alignment(s_info_layer, GTextAlignmentCenter);
   layer_add_child(s_scene_layer, text_layer_get_layer(s_info_layer));
 
-  // Apply loaded settings
   apply_settings();
 
-  // Initial update
   time_t now = time(NULL);
   struct tm *tt = localtime(&now);
   update_time_text(tt);
@@ -601,13 +543,13 @@ static void window_load(Window *win) {
 }
 
 static void window_unload(Window *win) {
-  if (s_fw_timer) { app_timer_cancel(s_fw_timer); s_fw_timer = NULL; }
+  if (s_rush_timer) { app_timer_cancel(s_rush_timer); s_rush_timer = NULL; }
   text_layer_destroy(s_time_layer);
   text_layer_destroy(s_info_layer);
   layer_destroy(s_scene_layer);
 }
 
-// ── Init / deinit ──────────────────────────────────────────────────────────
+// ── Init / deinit ───────────────────────────────────────────────────────────
 static void init(void) {
   s_window = window_create();
   window_set_background_color(s_window, GColorBlack);
