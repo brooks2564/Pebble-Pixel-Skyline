@@ -257,12 +257,12 @@ static void draw_billboard(GContext *ctx) {
 
   } else {
     // ── Digital: large text filling the billboard face ──────────────────
-    GFont dig_font = fonts_get_system_font(FONT_KEY_BITHAM_30_BLACK);
+    GFont dig_font = fonts_get_system_font(FONT_KEY_LECO_28_LIGHT_NUMBERS);
     graphics_context_set_text_color(ctx, GColorBlack);
-    // Bitham 30 renders ~30px tall; center in BB_FH=36 → 3px top margin
-    int ty = BB_FY + (BB_FH - 30) / 2;
+    // LECO_28 is 28px tall; center in BB_FH=36 → 4px margin each side
+    int ty = BB_FY + (BB_FH - 28) / 2;
     graphics_draw_text(ctx, s_time_buf, dig_font,
-                       GRect(BB_FX + 1, ty, BB_FW - 2, 30),
+                       GRect(BB_FX + 1, ty, BB_FW - 2, 28),
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 }
