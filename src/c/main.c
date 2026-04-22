@@ -61,6 +61,15 @@ static bool      s_rush_active = false;
 static int       s_rush_frame  = 0;
 static AppTimer *s_rush_timer  = NULL;
 
+// Fireworks (wrist tap)
+#define FW_FRAMES     30
+#define FW_PARTICLES  20
+typedef struct { int16_t x, y, vx, vy; GColor color; } Particle;
+static bool      s_fw_active = false;
+static int       s_fw_frame  = 0;
+static AppTimer *s_fw_timer  = NULL;
+static Particle  s_particles[FW_PARTICLES];
+
 // ── Weather helpers ────────────────────────────────────────────────────────
 enum WxCat { WX_UNKNOWN, WX_CLEAR, WX_CLOUDY, WX_RAIN, WX_SNOW, WX_FOG, WX_STORM };
 
@@ -410,6 +419,57 @@ static void draw_info_bar(GContext *ctx) {
   graphics_fill_rect(ctx, GRect(0, STREET_BOTTOM, SCREEN_W, 1), 0, GCornerNone);
 }
 
+// ── Fireworks ──────────────────────────────────────────────────────────────
+static void fw_step(void *data);
+
+static void spawn_fireworks(void) {
+  rng_set((uint32_t)time(NULL));
+  int cx = 40 + (int)(rng_next() % (SCREEN_W - 80));
+  int cy = 20 + (int)(rng_next() % 30);
+  static const GColor palette[] = {
+    {.argb=GColorRedARGB8}, {.argb=GColorYellowARGB8}, {.argb=GColorMagentaARGB8},
+    {.argb=GColorVividCeruleanARGB8}, {.argb=GColorGreenARGB8}, {.argb=GColorOrangeARGB8}
+  };
+  for (int i = 0; i < FW_PARTICLES; i++) {
+    int angle = i * (TRIG_MAX_ANGLE / FW_PARTICLES);
+    int speed = 3 + (int)(rng_next() % 3);
+    s_particles[i].x  = cx;
+    s_particles[i].y  = cy;
+    s_particles[i].vx = (int16_t)(sin_lookup(angle) * speed / TRIG_MAX_RATIO);
+    s_particles[i].vy = (int16_t)(-cos_lookup(angle) * speed / TRIG_MAX_RATIO);
+    s_particles[i].color = palette[i % 6];
+  }
+}
+
+static void draw_fireworks(GContext *ctx) {
+  if (!s_fw_active) return;
+  for (int i = 0; i < FW_PARTICLES; i++) {
+    Particle *p = &s_particles[i];
+    graphics_context_set_fill_color(ctx, p->color);
+    graphics_fill_rect(ctx, GRect(p->x, p->y, 2, 2), 0, GCornerNone);
+    graphics_context_set_fill_color(ctx, GColorLightGray);
+    graphics_fill_rect(ctx, GRect(p->x - p->vx / 2, p->y - p->vy / 2, 1, 1), 0, GCornerNone);
+  }
+}
+
+static void fw_step(void *data) {
+  s_fw_frame++;
+  for (int i = 0; i < FW_PARTICLES; i++) {
+    s_particles[i].x += s_particles[i].vx;
+    s_particles[i].y += s_particles[i].vy;
+    s_particles[i].vy += 1;  // gravity
+  }
+  layer_mark_dirty(s_scene_layer);
+  if (s_fw_frame < FW_FRAMES) {
+    s_fw_timer = app_timer_register(50, fw_step, NULL);
+  } else {
+    s_fw_active = false;
+    s_fw_frame  = 0;
+    s_fw_timer  = NULL;
+    layer_mark_dirty(s_scene_layer);
+  }
+}
+
 // ── Scene update ────────────────────────────────────────────────────────────
 static void scene_update(Layer *layer, GContext *ctx) {
   draw_sky(ctx);
@@ -417,6 +477,7 @@ static void scene_update(Layer *layer, GContext *ctx) {
   draw_city(ctx);
   draw_street(ctx);
   draw_info_bar(ctx);
+  draw_fireworks(ctx);
 }
 
 // ── Time / info text ────────────────────────────────────────────────────────
@@ -472,6 +533,13 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
   s_rush_active = true;
   s_rush_frame  = 0;
   start_rush_timer();
+  if (!s_fw_active) {
+    s_fw_active = true;
+    s_fw_frame  = 0;
+    spawn_fireworks();
+    if (s_fw_timer) app_timer_cancel(s_fw_timer);
+    s_fw_timer = app_timer_register(50, fw_step, NULL);
+  }
   vibes_short_pulse();
 }
 
@@ -564,6 +632,7 @@ static void window_load(Window *win) {
 
 static void window_unload(Window *win) {
   if (s_rush_timer) { app_timer_cancel(s_rush_timer); s_rush_timer = NULL; }
+  if (s_fw_timer)   { app_timer_cancel(s_fw_timer);   s_fw_timer   = NULL; }
   text_layer_destroy(s_time_layer);
   text_layer_destroy(s_info_layer);
   layer_destroy(s_scene_layer);
