@@ -256,12 +256,13 @@ static void draw_billboard(GContext *ctx) {
     graphics_fill_circle(ctx, GPoint(cx, cy), 2);
 
   } else {
-    // ── Digital: draw time text directly into scene (no TextLayer needed) ─
-    GFont dig_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+    // ── Digital: large text filling the billboard face ──────────────────
+    GFont dig_font = fonts_get_system_font(FONT_KEY_BITHAM_30_BLACK);
     graphics_context_set_text_color(ctx, GColorBlack);
-    int ty = BB_FY + (BB_FH - 26) / 2;
+    // Bitham 30 renders ~30px tall; center in BB_FH=36 → 3px top margin
+    int ty = BB_FY + (BB_FH - 30) / 2;
     graphics_draw_text(ctx, s_time_buf, dig_font,
-                       GRect(BB_FX + 2, ty, BB_FW - 4, 26),
+                       GRect(BB_FX + 1, ty, BB_FW - 2, 30),
                        GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
 }
@@ -357,18 +358,20 @@ static void draw_street(GContext *ctx) {
 
   if (!s_animations) return;
 
-  // Regular cars
-  static const CarSpec reg[3] = {
-    {  7, CITY_BOTTOM + 7,  { .argb = GColorRedARGB8    }, false },
-    { 11, CITY_BOTTOM + 20, { .argb = GColorYellowARGB8 }, false },
-    {  5, CITY_BOTTOM + 7,  { .argb = GColorBlueARGB8   }, false },
-  };
-  for (int i = 0; i < 3; i++) {
-    int cx = (s_frame * reg[i].speed + i * 80) % (SCREEN_W + 30) - 15;
-    draw_car(ctx, cx, reg[i].y, reg[i].body, false);
+  // Regular cars — hidden during rush so they don't overlap
+  if (!s_rush_active) {
+    static const CarSpec reg[3] = {
+      {  7, CITY_BOTTOM + 7,  { .argb = GColorRedARGB8    }, false },
+      { 11, CITY_BOTTOM + 20, { .argb = GColorYellowARGB8 }, false },
+      {  5, CITY_BOTTOM + 7,  { .argb = GColorBlueARGB8   }, false },
+    };
+    for (int i = 0; i < 3; i++) {
+      int cx = (s_frame * reg[i].speed + i * 80) % (SCREEN_W + 30) - 15;
+      draw_car(ctx, cx, reg[i].y, reg[i].body, false);
+    }
   }
 
-  // Rush hour bonus cars (6 fast cars, mixed directions)
+  // Rush hour cars (6 fast cars, mixed directions)
   if (s_rush_active) {
     static const CarSpec rush[6] = {
       { 18, CITY_BOTTOM + 6,  { .argb = GColorOrangeARGB8        }, false },
