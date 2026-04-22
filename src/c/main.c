@@ -11,18 +11,18 @@
 // y=208-228: info bar
 
 // ── Billboard (sky zone) ───────────────────────────────────────────────────
-#define BB_X      55
-#define BB_Y      26
-#define BB_W      90
-#define BB_H      44
+#define BB_X      32
+#define BB_Y      10
+#define BB_W      136
+#define BB_H      66
 #define BB_FX     (BB_X + 4)
 #define BB_FY     (BB_Y + 4)
 #define BB_FW     (BB_W - 8)
 #define BB_FH     (BB_H - 8)
 #define BB_CX     (BB_X + BB_W / 2)
 #define BB_CY     (BB_Y + BB_H / 2)
-#define BB_POLE_L (BB_X + 13)
-#define BB_POLE_R (BB_X + BB_W - 13)
+#define BB_POLE_L (BB_X + 22)
+#define BB_POLE_R (BB_X + BB_W - 22)
 
 // ── Persist keys ──────────────────────────────────────────────────────────
 #define PERSIST_CLOCK_STYLE  100
@@ -230,17 +230,19 @@ static void draw_billboard(GContext *ctx) {
     graphics_draw_line(ctx, GPoint(cx,     cy + r - 1), GPoint(cx,     cy + r - 3));
     graphics_draw_line(ctx, GPoint(cx - r + 1, cy),     GPoint(cx - r + 3, cy));
 
-    // Minute hand
+    // Minute hand (2px thick)
     int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
     int min_ex = cx + (sin_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
     int min_ey = cy - (cos_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
     graphics_context_set_stroke_color(ctx, GColorBlack);
-    graphics_draw_line(ctx, GPoint(cx, cy), GPoint(min_ex, min_ey));
+    graphics_draw_line(ctx, GPoint(cx,     cy), GPoint(min_ex,     min_ey));
+    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(min_ex + 1, min_ey));
 
-    // Hour hand (two pixels wide)
+    // Hour hand (3px thick)
     int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
     int hr_ex = cx + (sin_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
     int hr_ey = cy - (cos_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
+    graphics_draw_line(ctx, GPoint(cx - 1, cy), GPoint(hr_ex - 1, hr_ey));
     graphics_draw_line(ctx, GPoint(cx,     cy), GPoint(hr_ex,     hr_ey));
     graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(hr_ex + 1, hr_ey));
 
@@ -514,13 +516,13 @@ static void window_load(Window *win) {
   layer_set_update_proc(s_scene_layer, scene_update);
   layer_add_child(root, s_scene_layer);
 
-  // Digital clock TextLayer centered inside billboard inner face
-  // Face: GRect(BB_FX, BB_FY, BB_FW, BB_FH) = GRect(59, 30, 82, 36)
-  // Font ~20px tall; center vertically: y = BB_FY + (BB_FH - 22) / 2 = 37
-  s_time_font  = fonts_get_system_font(FONT_KEY_LECO_20_BOLD_NUMBERS);
-  s_time_layer = text_layer_create(GRect(BB_FX, BB_FY + 7, BB_FW, 22));
+  // Digital clock TextLayer centered in billboard inner face
+  // Face: GRect(BB_FX, BB_FY, BB_FW, BB_FH) = GRect(36, 14, 128, 58)
+  // LECO_28 is ~28px tall; center: BB_FY + (BB_FH-28)/2 = 14+15 = 29
+  s_time_font  = fonts_get_system_font(FONT_KEY_LECO_28_LIGHT_NUMBERS);
+  s_time_layer = text_layer_create(GRect(BB_FX, BB_FY + 15, BB_FW, 30));
   text_layer_set_background_color(s_time_layer, GColorClear);
-  text_layer_set_text_color(s_time_layer, GColorDarkCandyAppleRed);
+  text_layer_set_text_color(s_time_layer, GColorBlack);
   text_layer_set_font(s_time_layer, s_time_font);
   text_layer_set_text_alignment(s_time_layer, GTextAlignmentCenter);
   layer_add_child(s_scene_layer, text_layer_get_layer(s_time_layer));
