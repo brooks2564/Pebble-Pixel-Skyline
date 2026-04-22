@@ -63,7 +63,7 @@ static AppTimer *s_rush_timer  = NULL;
 
 // Fireworks (wrist tap)
 #define FW_FRAMES     30
-#define FW_PARTICLES  20
+#define FW_PARTICLES  40  // 2 bursts × 20 particles each
 typedef struct { int16_t x, y, vx, vy; GColor color; } Particle;
 static bool      s_fw_active = false;
 static int       s_fw_frame  = 0;
@@ -424,20 +424,24 @@ static void fw_step(void *data);
 
 static void spawn_fireworks(void) {
   rng_set((uint32_t)time(NULL));
-  int cx = 40 + (int)(rng_next() % (SCREEN_W - 80));
-  int cy = 20 + (int)(rng_next() % 30);
   static const GColor palette[] = {
     {.argb=GColorRedARGB8}, {.argb=GColorYellowARGB8}, {.argb=GColorMagentaARGB8},
     {.argb=GColorVividCeruleanARGB8}, {.argb=GColorGreenARGB8}, {.argb=GColorOrangeARGB8}
   };
-  for (int i = 0; i < FW_PARTICLES; i++) {
-    int angle = i * (TRIG_MAX_ANGLE / FW_PARTICLES);
-    int speed = 3 + (int)(rng_next() % 3);
-    s_particles[i].x  = cx;
-    s_particles[i].y  = cy;
-    s_particles[i].vx = (int16_t)(sin_lookup(angle) * speed / TRIG_MAX_RATIO);
-    s_particles[i].vy = (int16_t)(-cos_lookup(angle) * speed / TRIG_MAX_RATIO);
-    s_particles[i].color = palette[i % 6];
+  // Two bursts at different positions
+  int centers_x[2] = { 30 + (int)(rng_next() % 60), 110 + (int)(rng_next() % 60) };
+  int centers_y[2] = { 15 + (int)(rng_next() % 20), 15 + (int)(rng_next() % 20) };
+  for (int b = 0; b < 2; b++) {
+    for (int j = 0; j < 20; j++) {
+      int i = b * 20 + j;
+      int angle = j * (TRIG_MAX_ANGLE / 20);
+      int speed = 3 + (int)(rng_next() % 3);
+      s_particles[i].x  = centers_x[b];
+      s_particles[i].y  = centers_y[b];
+      s_particles[i].vx = (int16_t)(sin_lookup(angle) * speed / TRIG_MAX_RATIO);
+      s_particles[i].vy = (int16_t)(-cos_lookup(angle) * speed / TRIG_MAX_RATIO);
+      s_particles[i].color = palette[(i + b * 2) % 6];
+    }
   }
 }
 
