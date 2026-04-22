@@ -202,8 +202,8 @@ static void draw_billboard(GContext *ctx) {
   graphics_context_set_fill_color(ctx, GColorDarkGray);
   graphics_fill_rect(ctx, GRect(BB_X, BB_Y, BB_W, BB_H), 3, GCornersAll);
 
-  // Inner face — bright yellow for visibility
-  graphics_context_set_fill_color(ctx, GColorYellow);
+  // Inner face — white for maximum contrast
+  graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, GRect(BB_FX, BB_FY, BB_FW, BB_FH), 2, GCornersAll);
 
   // Borders
@@ -212,44 +212,58 @@ static void draw_billboard(GContext *ctx) {
   graphics_draw_round_rect(ctx, GRect(BB_FX, BB_FY, BB_FW, BB_FH), 2);
 
   if (s_clock_style == 0) {
+    // ── Analog: circle with thick colored hands ─────────────────────────
     int cx = BB_CX;
     int cy = BB_CY;
-    int r  = BB_FH / 2 - 2;
+    int r  = BB_FH / 2 - 1;  // 17px radius
 
-    // Clock circle background
-    graphics_context_set_fill_color(ctx, GColorYellow);
+    // Clock circle (white fill, black border)
+    graphics_context_set_fill_color(ctx, GColorWhite);
     graphics_fill_circle(ctx, GPoint(cx, cy), r);
     graphics_context_set_stroke_color(ctx, GColorBlack);
     graphics_draw_circle(ctx, GPoint(cx, cy), r);
 
-    // Cardinal ticks
-    graphics_context_set_stroke_color(ctx, GColorDarkGray);
-    graphics_draw_line(ctx, GPoint(cx,     cy - r + 1), GPoint(cx,     cy - r + 3));
-    graphics_draw_line(ctx, GPoint(cx + r - 1, cy),     GPoint(cx + r - 3, cy));
-    graphics_draw_line(ctx, GPoint(cx,     cy + r - 1), GPoint(cx,     cy + r - 3));
-    graphics_draw_line(ctx, GPoint(cx - r + 1, cy),     GPoint(cx - r + 3, cy));
+    // 12-o'clock pip
+    graphics_context_set_fill_color(ctx, GColorBlack);
+    graphics_fill_rect(ctx, GRect(cx - 1, cy - r + 2, 3, 3), 0, GCornerNone);
 
-    // Minute hand (2px thick)
-    int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
-    int min_ex = cx + (sin_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
-    int min_ey = cy - (cos_lookup(min_angle) * (r - 2) / TRIG_MAX_RATIO);
-    graphics_context_set_stroke_color(ctx, GColorBlack);
-    graphics_draw_line(ctx, GPoint(cx,     cy), GPoint(min_ex,     min_ey));
-    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(min_ex + 1, min_ey));
-
-    // Hour hand (3px thick)
+    // Hour hand — red, 5px wide via perpendicular offset
     int hr_angle = TRIG_MAX_ANGLE * ((s_hour % 12) * 60 + s_minute) / (12 * 60);
-    int hr_ex = cx + (sin_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
-    int hr_ey = cy - (cos_lookup(hr_angle) * (r * 2 / 3) / TRIG_MAX_RATIO);
-    graphics_draw_line(ctx, GPoint(cx - 1, cy), GPoint(hr_ex - 1, hr_ey));
-    graphics_draw_line(ctx, GPoint(cx,     cy), GPoint(hr_ex,     hr_ey));
-    graphics_draw_line(ctx, GPoint(cx + 1, cy), GPoint(hr_ex + 1, hr_ey));
+    int hr_len   = r * 3 / 5;
+    int hr_ex    = cx + (sin_lookup(hr_angle) * hr_len / TRIG_MAX_RATIO);
+    int hr_ey    = cy - (cos_lookup(hr_angle) * hr_len / TRIG_MAX_RATIO);
+    graphics_context_set_stroke_color(ctx, GColorRed);
+    for (int d = -2; d <= 2; d++) {
+      int opx = cos_lookup(hr_angle) * d / TRIG_MAX_RATIO;
+      int opy = sin_lookup(hr_angle) * d / TRIG_MAX_RATIO;
+      graphics_draw_line(ctx, GPoint(cx + opx, cy + opy), GPoint(hr_ex + opx, hr_ey + opy));
+    }
+
+    // Minute hand — black, 3px wide via perpendicular offset
+    int min_angle = TRIG_MAX_ANGLE * s_minute / 60;
+    int min_len   = r - 3;
+    int min_ex    = cx + (sin_lookup(min_angle) * min_len / TRIG_MAX_RATIO);
+    int min_ey    = cy - (cos_lookup(min_angle) * min_len / TRIG_MAX_RATIO);
+    graphics_context_set_stroke_color(ctx, GColorBlack);
+    for (int d = -1; d <= 1; d++) {
+      int opx = cos_lookup(min_angle) * d / TRIG_MAX_RATIO;
+      int opy = sin_lookup(min_angle) * d / TRIG_MAX_RATIO;
+      graphics_draw_line(ctx, GPoint(cx + opx, cy + opy), GPoint(min_ex + opx, min_ey + opy));
+    }
 
     // Center dot
     graphics_context_set_fill_color(ctx, GColorBlack);
     graphics_fill_circle(ctx, GPoint(cx, cy), 2);
+
+  } else {
+    // ── Digital: draw time text directly into scene (no TextLayer needed) ─
+    GFont dig_font = fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD);
+    graphics_context_set_text_color(ctx, GColorBlack);
+    int ty = BB_FY + (BB_FH - 26) / 2;
+    graphics_draw_text(ctx, s_time_buf, dig_font,
+                       GRect(BB_FX + 2, ty, BB_FW - 4, 26),
+                       GTextOverflowModeTrailingEllipsis, GTextAlignmentCenter, NULL);
   }
-  // Digital mode: TextLayer renders over the face
 }
 
 // ── Draw: city (12 full-width buildings, no tower) ─────────────────────────
@@ -407,15 +421,13 @@ static void update_time_text(struct tm *tt) {
   s_hour   = tt->tm_hour;
   s_minute = tt->tm_min;
 
-  if (s_clock_style == 1) {
-    if (s_hour_format) {
-      snprintf(s_time_buf, sizeof(s_time_buf), "%02d:%02d", tt->tm_hour, tt->tm_min);
-    } else {
-      int h12 = tt->tm_hour % 12;
-      if (h12 == 0) h12 = 12;
-      snprintf(s_time_buf, sizeof(s_time_buf), "%d:%02d", h12, tt->tm_min);
-    }
-    text_layer_set_text(s_time_layer, s_time_buf);
+  // Always format — draw_billboard uses this for both modes
+  if (s_hour_format) {
+    snprintf(s_time_buf, sizeof(s_time_buf), "%02d:%02d", tt->tm_hour, tt->tm_min);
+  } else {
+    int h12 = tt->tm_hour % 12;
+    if (h12 == 0) h12 = 12;
+    snprintf(s_time_buf, sizeof(s_time_buf), "%d:%02d", h12, tt->tm_min);
   }
 }
 
@@ -462,7 +474,8 @@ static void tap_handler(AccelAxisType axis, int32_t direction) {
 
 // ── Settings ────────────────────────────────────────────────────────────────
 static void apply_settings(void) {
-  layer_set_hidden(text_layer_get_layer(s_time_layer), s_clock_style != 1);
+  // Time is drawn directly by scene; TextLayer unused
+  layer_set_hidden(text_layer_get_layer(s_time_layer), true);
 }
 
 // ── AppMessage ──────────────────────────────────────────────────────────────
